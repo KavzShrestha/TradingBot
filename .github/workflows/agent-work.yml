@@ -57,28 +57,26 @@ jobs:
 
             IMPORTANT: this is a single, one-shot CI job. There is no way to resume or
             wait after you end your turn — the workflow step (and the runner) finishes
-            the moment you stop responding. Do NOT delegate by spawning a background or
-            async subagent (e.g. via the Task/Agent tool's default async mode) and then
-            stopping to "wait for it" — that work is abandoned and silently lost the
-            instant you end your turn, with no error. If you use Task/Agent, you must do
-            so synchronously and keep working turn-by-turn until it has actually
-            finished (files written, tests passing) before you do anything else.
-            Prefer simplicity: just implement the task yourself, directly, in this same
-            conversation — read the relevant persona at `.claude/agents/<role>.md` (the
-            Role column in the task table) for its workflow and constraints, and follow
-            it as if you were that subagent.
+            the moment you stop responding. Delegate using the `Task` tool ONLY — never
+            the `Agent` tool. `Task` blocks and returns the subagent's full result to you
+            in the same turn; `Agent` launches the subagent asynchronously in the
+            background and returns immediately, which abandons the work the instant you
+            end your turn (this is exactly what went wrong on the previous run: it
+            called `Agent`, got "launched in the background", said "I'll wait for it",
+            and then ended its turn — the subagent never got to finish because there was
+            no next turn to resume it in). If `Task` is unavailable for some reason,
+            implement the task yourself directly instead of using `Agent`.
 
-            1. Read docs/PLAN.md. If the current milestone has no tasks, follow the
-               `planner` persona at `.claude/agents/planner.md` yourself, then open its
-               PR and stop.
+            1. Read docs/PLAN.md. If the current milestone has no tasks, delegate to the
+               `planner` subagent via `Task`, then open its PR and stop.
             2. Otherwise pick the first task with status `todo` whose dependencies are
                `done` and that has no open PR. If none, stop.
-            3. Implement it yourself, following the persona/workflow of the subagent
-               named in its Role column (do not spawn it as a separate agent).
+            3. Delegate it to the subagent named in its Role column via `Task`, and wait
+               for its result (which `Task` gives you directly — no polling needed).
             4. Push the branch and open a PR with
                `gh pr create --label agent --base main`. Never push to main, never merge.
             5. End with a short summary of what was done, only after the PR is open.
           claude_args: >-
-            --max-turns 80
+            --max-turns 60
             --model sonnet
-            --allowedTools "Read,Edit,Write,Glob,Grep,WebSearch,WebFetch,Bash(git:*),Bash(gh:*),Bash(make:*),Bash(python:*),Bash(python3:*),Bash(pip:*),Bash(uv:*),Bash(pytest:*),Bash(ruff:*),Bash(mypy:*),Bash(npm:*),Bash(npx:*),Bash(node:*),Bash(ls:*),Bash(mkdir:*),Bash(cat:*)"
+            --allowedTools "Read,Edit,Write,Glob,Grep,Task,WebSearch,WebFetch,Bash(git:*),Bash(gh:*),Bash(make:*),Bash(python:*),Bash(python3:*),Bash(pip:*),Bash(uv:*),Bash(pytest:*),Bash(ruff:*),Bash(mypy:*),Bash(npm:*),Bash(npx:*),Bash(node:*),Bash(ls:*),Bash(mkdir:*),Bash(cat:*)"
