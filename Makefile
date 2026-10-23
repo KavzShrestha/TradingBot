@@ -35,6 +35,7 @@ setup-backend:
 
 setup-frontend:
 	cd $(FRONTEND_DIR) && npm install
+	cd $(FRONTEND_DIR) && npx playwright install --with-deps chromium
 
 test: test-backend test-frontend
 
@@ -43,6 +44,7 @@ test-backend:
 
 test-frontend:
 	cd $(FRONTEND_DIR) && npm run test
+	cd $(FRONTEND_DIR) && npm run test:e2e
 
 lint: lint-backend lint-frontend
 
