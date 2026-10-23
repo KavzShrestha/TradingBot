@@ -1,0 +1,44 @@
+# See https://pre-commit.com for usage and config details.
+# Install locally with: pip install pre-commit && pre-commit install
+#
+# Backend hooks (ruff, mypy) run against backend/app and backend/tests.
+# Frontend hooks (eslint) run against frontend/src via the local npm install,
+# since eslint's flat config + plugin set is easiest to keep in sync with
+# frontend/package.json rather than duplicating versions here.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        name: ruff (backend)
+        args: [--fix]
+        files: ^backend/
+      - id: ruff-format
+        name: ruff-format (backend)
+        files: ^backend/
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.11.2
+    hooks:
+      - id: mypy
+        name: mypy --strict (backend)
+        args: [--config-file=backend/pyproject.toml]
+        files: ^backend/app/
+        additional_dependencies: [fastapi, pydantic, uvicorn]
+
+  - repo: local
+    hooks:
+      - id: eslint
+        name: eslint (frontend)
+        entry: npm --prefix frontend run lint --
+        language: system
+        files: ^frontend/src/.*\.(ts|tsx)$
+        pass_filenames: false
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-merge-conflict
+      - id: check-added-large-files

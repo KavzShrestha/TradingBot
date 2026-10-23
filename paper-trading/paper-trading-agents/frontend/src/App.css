@@ -1,0 +1,44 @@
+main {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 32px 20px;
+  text-align: left;
+}
+
+.metric-card-row {
+  display: flex;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.metric-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px 20px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  min-width: 160px;
+}
+
+.metric-card__label {
+  font-size: 13px;
+  color: var(--text-h);
+}
+
+.metric-card__value {
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.positions-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.positions-table th,
+.positions-table td {
+  text-align: left;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
