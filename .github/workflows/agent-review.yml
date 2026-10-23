@@ -70,18 +70,27 @@ jobs:
           prompt: |
             Review PR #${{ github.event.pull_request.number }} following CLAUDE.md.
             Get the diff with `gh pr diff ${{ github.event.pull_request.number }}`.
-            1. Run the `code-reviewer` subagent on the diff.
+
+            IMPORTANT: this is a single, one-shot CI job — there is no way to resume or
+            wait after you end your turn. Do NOT spawn a background/async subagent (e.g.
+            via the Task/Agent tool's default async mode) for any step below; that work
+            is silently abandoned the instant you end your turn. Instead, perform each
+            role's review/fix yourself, directly, in this same conversation, following
+            the persona and checklist at `.claude/agents/<role>.md`.
+
+            1. Review the diff yourself following `.claude/agents/code-reviewer.md`.
             2. If the diff touches backend/app/strategies, engine, portfolio or backtest,
-               also run the `quant-reviewer` subagent.
+               also review it yourself following `.claude/agents/quant-reviewer.md`.
             3. Post each review as a PR comment (`gh pr comment`), including its VERDICT line.
             4. If any verdict is REQUEST CHANGES and fewer than 1 fix round has been
                done (done so far: ${{ steps.rounds.outputs.n }}), first add the label
-               `fix-round-1`, then delegate the fixes to the subagent that owns the PR's
-               branch prefix and push the fixes to the same branch.
+               `fix-round-1`, then fix the issues yourself (following the persona of the
+               role that owns the PR's branch prefix) and push the fixes to the same
+               branch.
             5. If both verdicts are APPROVE, add the label `ready-for-human`.
                Otherwise, if the fix round is already used up, add `needs-human`.
             Never merge.
           claude_args: >-
-            --max-turns 30
+            --max-turns 60
             --model sonnet
-            --allowedTools "Read,Edit,Write,Glob,Grep,Task,Agent,Bash(git:*),Bash(gh:*),Bash(make:*),Bash(python:*),Bash(python3:*),Bash(pip:*),Bash(uv:*),Bash(pytest:*),Bash(ruff:*),Bash(mypy:*),Bash(npm:*),Bash(npx:*),Bash(node:*),Bash(ls:*),Bash(cat:*)"
+            --allowedTools "Read,Edit,Write,Glob,Grep,Bash(git:*),Bash(gh:*),Bash(make:*),Bash(python:*),Bash(python3:*),Bash(pip:*),Bash(uv:*),Bash(pytest:*),Bash(ruff:*),Bash(mypy:*),Bash(npm:*),Bash(npx:*),Bash(node:*),Bash(ls:*),Bash(cat:*)"
