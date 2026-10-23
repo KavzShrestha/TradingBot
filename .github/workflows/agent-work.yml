@@ -52,21 +52,31 @@ jobs:
           # Set ONE of these two secrets (see SETUP.md); the other can stay unset.
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          # TEMPORARY: prints Claude's full transcript (reasoning + tool calls) to the
-          # job log instead of hiding it, so we can see why a run doesn't delegate/open
-          # a PR. Revert once diagnosed.
-          show_full_output: true
           prompt: |
             You are the orchestrator for this repo. Follow CLAUDE.md strictly.
+
+            IMPORTANT: this is a single, one-shot CI job. There is no way to resume or
+            wait after you end your turn — the workflow step (and the runner) finishes
+            the moment you stop responding. Delegate using the `Task` tool ONLY — never
+            the `Agent` tool. `Task` blocks and returns the subagent's full result to you
+            in the same turn; `Agent` launches the subagent asynchronously in the
+            background and returns immediately, which abandons the work the instant you
+            end your turn (this is exactly what went wrong on the previous run: it
+            called `Agent`, got "launched in the background", said "I'll wait for it",
+            and then ended its turn — the subagent never got to finish because there was
+            no next turn to resume it in). If `Task` is unavailable for some reason,
+            implement the task yourself directly instead of using `Agent`.
+
             1. Read docs/PLAN.md. If the current milestone has no tasks, delegate to the
-               `planner` subagent, then open its PR and stop.
+               `planner` subagent via `Task`, then open its PR and stop.
             2. Otherwise pick the first task with status `todo` whose dependencies are
                `done` and that has no open PR. If none, stop.
-            3. Delegate it to the subagent named in its Role column.
+            3. Delegate it to the subagent named in its Role column via `Task`, and wait
+               for its result (which `Task` gives you directly — no polling needed).
             4. Push the branch and open a PR with
                `gh pr create --label agent --base main`. Never push to main, never merge.
-            5. End with a short summary of what was done.
+            5. End with a short summary of what was done, only after the PR is open.
           claude_args: >-
-            --max-turns 40
+            --max-turns 60
             --model sonnet
-            --allowedTools "Read,Edit,Write,Glob,Grep,Task,Agent,WebSearch,WebFetch,Bash(git:*),Bash(gh:*),Bash(make:*),Bash(python:*),Bash(python3:*),Bash(pip:*),Bash(uv:*),Bash(pytest:*),Bash(ruff:*),Bash(mypy:*),Bash(npm:*),Bash(npx:*),Bash(node:*),Bash(ls:*),Bash(mkdir:*),Bash(cat:*)"
+            --allowedTools "Read,Edit,Write,Glob,Grep,Task,WebSearch,WebFetch,Bash(git:*),Bash(gh:*),Bash(make:*),Bash(python:*),Bash(python3:*),Bash(pip:*),Bash(uv:*),Bash(pytest:*),Bash(ruff:*),Bash(mypy:*),Bash(npm:*),Bash(npx:*),Bash(node:*),Bash(ls:*),Bash(mkdir:*),Bash(cat:*)"
