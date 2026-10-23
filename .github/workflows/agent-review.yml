@@ -67,6 +67,10 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # agent-work.yml opens PRs as the claude[bot] GitHub App identity. Without
+          # this, claude-code-action refuses to run on bot-authored PRs (an
+          # anti-recursion safeguard) with "Workflow initiated by non-human actor".
+          allowed_bots: "claude[bot]"
           prompt: |
             Review PR #${{ github.event.pull_request.number }} following CLAUDE.md.
             Get the diff with `gh pr diff ${{ github.event.pull_request.number }}`.
