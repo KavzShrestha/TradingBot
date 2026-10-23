@@ -7,7 +7,7 @@ Each task = one PR. The planner expands each milestone into tasks when it starts
 | ID | Title | Role | Status |
 |---|---|---|---|
 | M0-01 | Repo scaffold: backend (FastAPI), frontend (Vite React TS), Makefile with all targets, pre-commit, .env.example | backend-engineer | done |
-| M0-02 | Config with `PAPER_TRADING` guard and live-endpoint denylist + tests that the app refuses to start otherwise | backend-engineer | todo |
+| M0-02 | Config with `PAPER_TRADING` guard and live-endpoint denylist + tests that the app refuses to start otherwise | backend-engineer | in review |
 | M0-03 | CI passes on an empty app (lint, type check, tests, Playwright smoke) | backend-engineer | todo |
 
 ## M1 — Data

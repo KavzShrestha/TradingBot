@@ -12,6 +12,15 @@ def test_settings_defaults_are_typed() -> None:
     assert settings.paper_trading is True
     assert isinstance(settings.starting_capital, Decimal)
     assert settings.starting_capital == Decimal("100000")
+    assert settings.data_base_url == "https://paper-api.alpaca.markets"
+
+
+def test_settings_from_env_reads_data_base_url_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DATA_BASE_URL", "https://sandbox.example.com")
+    settings = Settings.from_env()
+    assert settings.data_base_url == "https://sandbox.example.com"
 
 
 def test_settings_from_env_reads_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
