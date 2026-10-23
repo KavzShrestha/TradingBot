@@ -1,0 +1,68 @@
+# Scheduled "worker": the orchestrator picks the next ready task from docs/PLAN.md,
+# hands it to the right subagent, and opens a PR. Runs once a day.
+# Docs: https://code.claude.com/docs/en/github-actions
+name: agent-work
+
+on:
+  schedule:
+    - cron: "23 7 * * *"   # once a day at 07:23 UTC (one task per day)
+  workflow_dispatch: {}    # lets you start a run manually from the Actions tab
+
+concurrency:
+  group: agent-work
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  id-token: write
+  actions: read
+
+jobs:
+  work:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # Personal access token so the PR this run opens triggers agent-review.yml
+          # (events created with the default GITHUB_TOKEN don't start other workflows).
+          token: ${{ secrets.AGENT_GH_TOKEN }}
+
+      - name: Configure git identity
+        run: |
+          git config user.name "paper-trading-agent"
+          git config user.email "paper-trading-agent@users.noreply.github.com"
+
+      - name: Skip if an agent PR is already waiting
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          open=$(gh pr list --label agent --state open --json number --jq 'length')
+          echo "open=$open" >> "$GITHUB_OUTPUT"
+
+      - uses: anthropics/claude-code-action@v1
+        if: steps.gate.outputs.open < 1
+        env:
+          GH_TOKEN: ${{ secrets.AGENT_GH_TOKEN }}
+        with:
+          # Set ONE of these two secrets (see SETUP.md); the other can stay unset.
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            You are the orchestrator for this repo. Follow CLAUDE.md strictly.
+            1. Read docs/PLAN.md. If the current milestone has no tasks, delegate to the
+               `planner` subagent, then open its PR and stop.
+            2. Otherwise pick the first task with status `todo` whose dependencies are
+               `done` and that has no open PR. If none, stop.
+            3. Delegate it to the subagent named in its Role column.
+            4. Push the branch and open a PR with
+               `gh pr create --label agent --base main`. Never push to main, never merge.
+            5. End with a short summary of what was done.
+          claude_args: >-
+            --max-turns 40
+            --model sonnet
+            --allowedTools "Read,Edit,Write,Glob,Grep,Task,Agent,WebSearch,WebFetch,Bash(git:*),Bash(gh:*),Bash(make:*),Bash(python:*),Bash(python3:*),Bash(pip:*),Bash(uv:*),Bash(pytest:*),Bash(ruff:*),Bash(mypy:*),Bash(npm:*),Bash(npx:*),Bash(node:*),Bash(ls:*),Bash(mkdir:*),Bash(cat:*)"

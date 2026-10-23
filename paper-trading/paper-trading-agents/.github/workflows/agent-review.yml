@@ -1,0 +1,87 @@
+# Runs both reviewer subagents on every agent PR, then lets the implementer fix
+# requested changes, 1 round only (to limit cost). After that, the PR waits for you.
+# Docs: https://code.claude.com/docs/en/github-actions
+name: agent-review
+
+on:
+  pull_request:
+    types: [opened, synchronize, labeled]
+
+concurrency:
+  group: agent-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: false   # a fix push queues a re-review instead of killing the current one
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  id-token: write
+  actions: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Skipped until task M0-01 adds the Makefile
+      - if: hashFiles('Makefile') != ''
+        run: make setup
+      - if: hashFiles('Makefile') != ''
+        run: make lint
+      - if: hashFiles('Makefile') != ''
+        run: make test
+
+  review:
+    needs: checks
+    # Only agent PRs. On "labeled" events, only react to the `agent` label itself,
+    # so adding fix-round / ready-for-human labels doesn't start another review.
+    if: >-
+      contains(github.event.pull_request.labels.*.name, 'agent') &&
+      (github.event.action != 'labeled' || github.event.label.name == 'agent')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.ref }}
+          token: ${{ secrets.AGENT_GH_TOKEN }}
+
+      - name: Configure git identity
+        run: |
+          git config user.name "paper-trading-agent"
+          git config user.email "paper-trading-agent@users.noreply.github.com"
+
+      - name: Count previous fix rounds
+        id: rounds
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          n=$(gh pr view ${{ github.event.pull_request.number }} --json labels \
+              --jq '[.labels[].name | select(startswith("fix-round-"))] | length')
+          echo "n=$n" >> "$GITHUB_OUTPUT"
+
+      - uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ secrets.AGENT_GH_TOKEN }}
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            Review PR #${{ github.event.pull_request.number }} following CLAUDE.md.
+            Get the diff with `gh pr diff ${{ github.event.pull_request.number }}`.
+            1. Run the `code-reviewer` subagent on the diff.
+            2. If the diff touches backend/app/strategies, engine, portfolio or backtest,
+               also run the `quant-reviewer` subagent.
+            3. Post each review as a PR comment (`gh pr comment`), including its VERDICT line.
+            4. If any verdict is REQUEST CHANGES and fewer than 1 fix round has been
+               done (done so far: ${{ steps.rounds.outputs.n }}), first add the label
+               `fix-round-1`, then delegate the fixes to the subagent that owns the PR's
+               branch prefix and push the fixes to the same branch.
+            5. If both verdicts are APPROVE, add the label `ready-for-human`.
+               Otherwise, if the fix round is already used up, add `needs-human`.
+            Never merge.
+          claude_args: >-
+            --max-turns 30
+            --model sonnet
+            --allowedTools "Read,Edit,Write,Glob,Grep,Task,Agent,Bash(git:*),Bash(gh:*),Bash(make:*),Bash(python:*),Bash(python3:*),Bash(pip:*),Bash(uv:*),Bash(pytest:*),Bash(ruff:*),Bash(mypy:*),Bash(npm:*),Bash(npx:*),Bash(node:*),Bash(ls:*),Bash(cat:*)"
