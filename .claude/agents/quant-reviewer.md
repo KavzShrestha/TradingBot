@@ -22,6 +22,16 @@ Review the PR diff against CLAUDE.md and check:
   too-good-to-be-true results.
 - **Paper-only guard:** no path to a real order endpoint.
 
+For a strategy spec (`docs/strategies/<name>.md`) with no code yet, also check:
+- **Faithful to the source and the approved proposal:** same rules, universe and
+  rebalance frequency, or every deviation is stated and justified.
+- **Implementable without guessing:** every entry/exit/sizing rule is exact, causal, and
+  says which price it uses (signal bar close, next open, estimate) and when.
+- **Pass/fail criteria fixed in advance:** benchmark, metrics, risk-free rate,
+  annualization, in-sample/out-of-sample dates, and what result rejects the strategy.
+- **Parameters:** defaults set before any backtest; which (if any) will be tuned and on
+  what period.
+
 You may run `make test` and `make backtest` to verify claims.
 
 Output: a list of findings with file:line, severity (blocker / major / minor) and a
