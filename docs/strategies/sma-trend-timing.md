@@ -91,10 +91,13 @@ is evaluated independently.
 - The SMA input for a month with a missing last-day bar is the last valid close of that
   month (no trade on it). If the whole month has no valid bar, that month is absent from
   the SMA window (the window is the last `sma_months` months that have a valid close).
-- Unscheduled closures (the exchange is closed on a day the calendar lists as open, or
-  the calendar helper is unavailable): treat the last day with bars in the month as not a
-  month-end (no trade that month), because the calendar said another day was last. The
-  report lists every month-end skipped for this reason or for stale/missing bars.
+- Unscheduled closures (the exchange is closed on a day the calendar lists as open): treat
+  the last day with bars in the month as not a month-end (no trade that month), because
+  the calendar said another day was last. The report lists every month-end skipped for
+  this reason or for stale/missing bars.
+- Calendar helper unavailable (distinct from the above): the month-end variant **halts
+  with an error** (the strategy raises and the engine stops that strategy); it never
+  silently skips the month. The daily variant does not need the calendar for signals.
 - Daily variant: a missing bar is skipped; the SMA uses the last `sma_window` valid
   closes.
 
@@ -102,10 +105,17 @@ is evaluated independently.
 
 - **Whole shares only**, rounded down. Cash left from rounding stays in cash.
 - **Slipped price estimate** for sizing a buy on bar t (the open of t+1 is unknown):
-  `est = close_t * (1 + slippage_bps/10000)`; quantity =
-  `floor(target_value / est)` where `target_value` = 1/K of equity at close of t, less
-  the commission. At fill time the actual fill is `open_{t+1} * (1 + slippage_bps/10000)`
-  for buys and `open_{t+1} * (1 - slippage_bps/10000)` for sells.
+  `est = close_t * (1 + slippage_bps/10000)`. This `est` is the only price used for
+  quantity; the actual fill price never feeds back into the quantity except via the
+  pro-rata cut below. At fill time the actual fill is
+  `open_{t+1} * (1 + slippage_bps/10000)` for buys and `open_{t+1} * (1 - slippage_bps/10000)`
+  for sells.
+- **Sizing order (buys):** (1) `target_value` = 1/K of equity at close of t, **capped at
+  cash available at signal time minus the commission** (cash after any sells pending on
+  the same bar is not counted, since proceeds are only known at fill; the fill-time
+  pro-rata cut handles that); (2) `qty = (target_value - commission) / est`; (3) pro-rata
+  cut at fill time if cash is short; (4) round down to whole shares last.
+  Rounding is applied once, after the cut.
 - **Order of execution on one bar:** sells are filled before buys, so sale proceeds are
   available to the buys.
 - **Cash shortfall:** if cash at fill time is insufficient for all pending buys (e.g.
@@ -160,13 +170,25 @@ Bar size: daily.
   adjusted). Signals (closes/SMA) and simulated fills (opens) both use these adjusted
   prices, and no separate dividend cash flow is modelled: dividends are implicitly
   reinvested while the instrument is held and not earned while flat. The benchmarks use
-  the same adjusted prices, so dividends are treated identically. The same
+  the same adjusted prices, so **within the backtest** strategy and benchmarks are
+  treated identically. **Live paper mode differs:** the ledger does not credit cash on
+  ex-dates (no corporate-action handling yet), so live P&L will trail the backtest by
+  roughly the held instruments' dividend yield (e.g. TLT's) until the ledger supports
+  corporate actions. Live-vs-backtest comparisons must adjust for this (compare against a
+  live buy-and-hold run, not against backtest levels). Corporate-action handling in the
+  ledger is deferred to a needs-planning issue. The same
   `adjustment` setting is used in live paper mode and in backtests. Caveat: adjusted
   history is restated after each distribution, so a backtest run later sees slightly
   different levels than a signal computed live on the day; the report records the fetch
   date.
 - **Data feed:** Alpaca `feed=iex` (free plan), identical in live and backtest. Volumes
   are IEX-only and are not used except for the stale-bar check (volume 0).
+- **IEX open caveat:** IEX bar opens are the first IEX print, not the official exchange
+  opening auction price, so simulated fills can differ from real opens. The report must
+  record the first available IEX bar date per symbol and, for a sample of days (at least
+  20 per symbol, if a second source such as the SIP feed is available on the account),
+  the distribution of open differences versus the official open; if no second source is
+  available, state that this was not measurable.
 - **Deviations from Faber (2007) that the report must list:** (1) universe of 5 liquid US
   ETFs (SPY, QQQ, IWM, TLT, GLD) rather than Faber's five asset-class indices; (2) the
   signal is computed at the month-end close but filled at the **next open** with slippage
@@ -195,18 +217,33 @@ Evaluated on the equal-weight 5-ETF portfolio, after slippage and commission.
   report, together with a **fixed end date** for the data. The split falls on a **month
   boundary** (OOS starts on the first trading day of a month). Both variants use the same
   split, end date and evaluation window.
-- **Fresh start at the OOS date:** the OOS run is a new run that warms up the SMA on
-  pre-OOS bars **without trading**, starts **flat with 100,000 cash** on the OOS start
-  date, and takes the first long signal as a buy (no inherited positions from the
-  in-sample run). The benchmark starts on the same date with the same capital. All OOS
-  metrics are computed on the OOS equity curve rebased to the start.
+- **Fresh start at the OOS date (aligned with the benchmark):** the OOS run is a new run
+  with 100,000 cash and no inherited positions from the in-sample run. The SMA is warmed up
+  on pre-OOS bars **without trading** (warm-up data only). The starting target is the signal
+  computed at the **last month-end bar before the OOS start** (month-end variant) or at the
+  last bar before the OOS start (daily variant); if that signal is long, the strategy buys
+  at the **open of the first OOS bar**, the same bar and open at which the benchmark enters.
+  If it is flat, it stays in cash. The same rule applies at the start of the in-sample
+  period once warm-up is complete.
+- **Exact first evaluated bar:** the first bar of the evaluation window (in-sample or OOS)
+  is the first trading day on or after the window start date for which **both** variants
+  have full warm-up (10 month-end closes, 200 bars). It is identical for the strategy,
+  both variants and both benchmarks; because warm-ups differ (10 months vs 200 bars), the
+  in-sample start date is set to the later of the two warm-up completions. Equity is
+  measured from that bar's open fill, and all metrics are computed on the equity curve
+  rebased to the start. For the OOS window, warm-up completes before the split by
+  construction, so the first evaluated bar is the first trading day of the OOS month.
 - **Regime coverage warning:** with ~30% held out, OOS starts around late 2023, so both
   bear markets (2020, 2022) fall in-sample and the OOS period may contain no bear market
   at all. The report must (a) list the drawdown episodes (peak, trough, depth,
   duration) of the equal-weight buy-and-hold for the in-sample and the OOS period
   separately, and (b) state the number of OOS month-end decisions (about 36 expected).
-  If OOS contains no buy-and-hold drawdown deeper than ~10%, criterion 1 is reported but
-  flagged as uninformative rather than passed on its own.
+  **Pre-registered informativeness rule:** criterion 1 is *uninformative* if the OOS
+  equal-weight buy-and-hold max drawdown is **< 10.0%** (exact threshold, measured on the
+  rebased OOS daily equity curve after costs). Consequence, fixed in advance: if
+  uninformative, criterion 1 is reported but neither counts as passed nor failed; enabling
+  in live paper mode then requires criteria 2 and 3 to pass, and the report must state
+  explicitly that there is no OOS drawdown evidence for the strategy.
 - **Risk-free rate and annualization:** Sharpe uses rf = 0% (consistent with cash earning
   nothing) and an annualization factor of sqrt(252) on daily returns. The report states both.
 
@@ -216,7 +253,9 @@ daily variant is **informational**: it is reported but cannot be promoted, selec
 enabled on the basis of OOS results, and a daily-variant pass does not rescue a
 month-end failure.
 
-The strategy is kept only if, **out-of-sample** (month-end default config):
+The strategy is a candidate for live paper enablement only if, **out-of-sample**
+(month-end default config), criteria 1-3 hold (criterion 1 handled per the
+informativeness rule above):
 
 1. Max drawdown <= 2/3 of equal-weight buy-and-hold's max drawdown over the same period.
 2. Sharpe >= buy-and-hold Sharpe - 0.1.
@@ -228,8 +267,11 @@ The strategy is kept only if, **out-of-sample** (month-end default config):
    the total number of configurations tried (the gross diagnostic run excluded). Month-end
    remains the default regardless of how the daily variant does.
 
-If criterion 1 or 2 fails OOS, the strategy is **not** enabled in live paper mode. A
-rejected strategy is a valid outcome. Results are evidence, not predictions; backtest
+Enablement decision (single rule): the strategy is **not** enabled in live paper mode if
+criterion 1 fails (when informative), or criterion 2 fails, or criterion 3 fails. If
+criterion 1 is uninformative, criteria 2 and 3 must both pass. Criteria 4 and 5 do not
+block by themselves but, if criterion 4's limits are breached, the default must be revisited
+before enabling. A rejected strategy is a valid outcome. Results are evidence, not predictions; backtest
 returns must never be described as expected real returns.
 
 ## Expected regime
@@ -241,7 +283,7 @@ fall inside our data (plus the 2018 Q4 drawdown), and all of these are likely in
 ## Known failure modes
 
 - **Whipsaw** in range-bound markets: repeated false crosses, each paying slippage and
-  commission. Much worse for the daily variant (clusters in e.g. 2015-16, 2018, 2022).
+  commission. Much worse for the daily variant (clusters in e.g. 2018 and 2022).
 - **Late re-entry** after sharp V-shaped recoveries (e.g. March 2020). The month-end
   variant can lag by up to a month on top of the SMA lag itself.
 - **Lag:** exits only after a decline of roughly 5-15%.
