@@ -1,7 +1,7 @@
 # CLAUDE.md — Paper Trading Platform
 
 This file is the rulebook for every agent working in this repo. Read it fully, then read
-`docs/GOAL.md` and `docs/PLAN.md` before starting any task.
+`docs/GOAL.md`, `docs/PLAN.md` and your task issue before starting any task.
 
 ## Mission
 
@@ -29,8 +29,8 @@ agents never make trading decisions at runtime.
    human owner merges.
 4. **Never weaken checks to get green CI.** Do not delete, skip, or loosen tests, lint
    rules, or type checks. If a test is wrong, fix it and explain why in the PR.
-5. **One task per PR.** Reference the task ID from `docs/PLAN.md`. Aim for under ~400
-   changed lines; split larger work.
+5. **One task per PR.** Each PR closes exactly one task issue (`Closes #<n>`) and uses its
+   task ID. Aim for under ~400 changed lines; split larger work.
 6. **Protected files.** Do not modify `CLAUDE.md`, `.claude/`, `docs/GOAL.md`, or
    `.github/workflows/` unless the task explicitly says so.
 7. **When unsure, ask, don't guess.** For ambiguous or architectural decisions, open a
@@ -59,7 +59,7 @@ frontend/                 React + TypeScript + Vite
     api/                  typed client for backend REST/WebSocket
 docs/
   GOAL.md                 the end goal (human-owned)
-  PLAN.md                 milestones and tasks (planner-owned)
+  PLAN.md                 milestones (planner-owned); tasks live in GitHub Issues
   strategies/             one write-up per strategy
   adr/                    architecture decision records
 .github/workflows/        CI (human-owned)
@@ -138,7 +138,7 @@ Quality bars:
 
 ## Definition of done (every PR)
 
-- [ ] Linked to a task ID in `docs/PLAN.md`; task status updated in the same PR.
+- [ ] Closes its task issue (`Closes #<n>`); the PR has labels `agent` and `role:<role>`.
 - [ ] Tests added or updated; `make test` and `make lint` pass locally.
 - [ ] PR description includes: **What / Why / How tested / Risks**, and screenshots for
       any UI change.
@@ -171,9 +171,37 @@ Defined in `.claude/agents/`. Each agent stays inside its role.
 
 | Agent | Owns | May edit |
 |---|---|---|
-| `planner` | breaking milestones into tasks | `docs/PLAN.md`, `docs/adr/` |
-| `strategy-researcher` | strategy ideas, specs, implementations, backtests | `backend/app/strategies/`, `docs/strategies/`, related tests |
+| `planner` | turning milestones, approved proposals and flagged work into task issues | task issues, `docs/PLAN.md`, `docs/adr/` |
+| `strategy-researcher` | strategy ideas (proposal issues), specs, implementations, backtests | `backend/app/strategies/`, `docs/strategies/`, related tests |
 | `backend-engineer` | data, engine, portfolio, API, storage | `backend/` (not `strategies/` logic) |
 | `frontend-engineer` | dashboards and UI | `frontend/` |
-| `quant-reviewer` | correctness of trading logic | nothing (review only) |
+| `quant-reviewer` | approving strategy proposals; correctness of trading logic | nothing (review only) |
 | `code-reviewer` | general code quality and safety | nothing (review only) |
+
+## Task board and how agents collaborate
+
+Agents run in parallel as separate GitHub Actions jobs and coordinate only through
+GitHub Issues, labels and PRs. Nobody edits another agent's in-progress work.
+
+```
+strategy-researcher --proposal issue--> quant-reviewer --proposal-approved--> planner
+planner --task issues (role:*)--> backend / frontend / strategy workers --PR--> reviewers --> human merges
+anyone --needs-planning issue--> planner
+```
+
+| Label | Meaning |
+|---|---|
+| `task` | a unit of work = one PR. Title starts with its ID, e.g. `M2-04: fill model` |
+| `role:backend` / `role:frontend` / `role:strategy` | which worker picks it up (also put on that worker's PR) |
+| `milestone:M#` | milestone from `docs/PLAN.md` |
+| `status:todo` → `status:in-progress` → `status:in-review` → closed by the merged PR | task lifecycle |
+| `status:blocked` | waiting on something other than an issue; reason in the body |
+| `proposal` | a strategy idea from the researcher, waiting for the quant-reviewer |
+| `proposal-approved` / `proposal-rejected` | quant-reviewer's verdict |
+| `planned` | an approved proposal the planner has turned into tasks |
+| `needs-planning` | extra work someone found; the planner turns it into tasks |
+
+- Dependencies: the last line of a task body is `Depends on: #12, #15`. A task is ready
+  when it is `status:todo` and every issue it depends on is closed.
+- Found work outside your task? Don't do it. Open an issue labelled `needs-planning`.
+- Each role has at most one open agent PR at a time.

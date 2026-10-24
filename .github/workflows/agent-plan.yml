@@ -1,0 +1,72 @@
+# Planner: turns goals into task issues for the workers. Runs when
+#  - a strategy proposal is approved by the quant-reviewer (`proposal-approved`),
+#  - any agent or reviewer flags extra work (`needs-planning`),
+#  - daily, to expand the next milestone and unblock tasks whose blockers are gone.
+# When it creates ready tasks it kicks agent-work.yml so workers start right away.
+# Docs: https://code.claude.com/docs/en/github-actions
+name: agent-plan
+
+on:
+  issues:
+    types: [labeled]
+  schedule:
+    - cron: "5 6 * * *"   # daily at 06:05 UTC
+  workflow_dispatch: {}
+
+# One planner at a time so two runs never create duplicate tasks.
+concurrency:
+  group: agent-plan
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  id-token: write
+  actions: write
+
+jobs:
+  plan:
+    if: >-
+      github.event_name != 'issues' ||
+      github.event.label.name == 'proposal-approved' ||
+      github.event.label.name == 'needs-planning'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      GH_TOKEN: ${{ secrets.AGENT_GH_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.AGENT_GH_TOKEN }}
+
+      - name: Configure git identity
+        run: |
+          git config user.name "paper-trading-agent"
+          git config user.email "paper-trading-agent@users.noreply.github.com"
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            You are the `planner` for this repo. Read CLAUDE.md, docs/GOAL.md,
+            docs/PLAN.md and .claude/agents/planner.md, and follow it as your own
+            instructions. Do the work yourself; do not delegate to subagents.
+
+            Trigger: ${{ github.event_name }}${{ github.event.issue.number && format(' on issue #{0} (label: {1})', github.event.issue.number, github.event.label.name) || '' }}.
+
+            Do every step of the planner's "Each run" checklist that applies, then stop.
+          claude_args: >-
+            --max-turns 40
+            --model sonnet
+            --allowedTools "Read,Edit,Write,Glob,Grep,Bash(git:*),Bash(gh:*),Bash(ls:*),Bash(cat:*)"
+
+      # Start the workers now instead of waiting for the next 4-hourly tick.
+      # The workers' own gate exits cheaply if nothing is ready.
+      # Needs Actions: read/write on AGENT_GH_TOKEN; harmless if missing (the schedule
+      # still picks the tasks up).
+      - name: Kick workers
+        continue-on-error: true
+        run: gh workflow run agent-work.yml --ref main

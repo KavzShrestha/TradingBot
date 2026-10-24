@@ -23,9 +23,12 @@ A self-running paper-trading system that:
 ## Constraints
 
 - Paper money only, forever. No real order endpoints anywhere in the codebase.
-- Market data source: <!-- fill in, e.g. Alpaca paper API (US stocks), Binance testnet / public market data (crypto), Polygon -->
-- Instruments: <!-- fill in, e.g. SPY, QQQ, AAPL, BTC-USD -->
-- Bar size: <!-- fill in, e.g. 1-minute for live, daily for long backtests -->
+- Market data source: Alpaca market data API, free plan (IEX feed), via paper-account keys.
+- Instruments: liquid US ETFs: SPY, QQQ, IWM (equities), TLT (bonds), GLD (gold).
+  Strategies may propose other liquid US ETFs; crypto may be added in a later milestone.
+- Bar size: daily bars for backtests and daily strategies; 1-hour bars for intraday
+  strategies and live P&L updates. Live P&L marks positions to the latest quote/bar during
+  US market hours.
 - Budget for data/API costs: <!-- fill in -->
 
 ## Non-goals (for now)

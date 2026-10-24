@@ -1,16 +1,15 @@
-# Scheduled "worker": the orchestrator picks the next ready task from docs/PLAN.md,
-# hands it to the right subagent, and opens a PR. Runs once a day.
+# Parallel "workers": one job per role (backend, frontend, strategy). Each job picks the
+# next ready task issue for its role from the GitHub Issues board, implements it as that
+# role, and opens a PR. Roles run at the same time; each role has at most one open PR.
 # Docs: https://code.claude.com/docs/en/github-actions
 name: agent-work
 
 on:
   schedule:
-    - cron: "23 7 * * *"   # once a day at 07:23 UTC (one task per day)
-  workflow_dispatch: {}    # lets you start a run manually from the Actions tab
-
-concurrency:
-  group: agent-work
-  cancel-in-progress: false
+    - cron: "17 */4 * * *"   # every 4 hours
+  push:
+    branches: [main]         # a merge may have unblocked dependent tasks
+  workflow_dispatch: {}      # manual run from the Actions tab (also used by agent-plan)
 
 permissions:
   contents: write
@@ -23,6 +22,23 @@ jobs:
   work:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - role: backend
+            agent: backend-engineer
+          - role: frontend
+            agent: frontend-engineer
+          - role: strategy
+            agent: strategy-researcher
+    # One run per role at a time; different roles run in parallel.
+    concurrency:
+      group: agent-work-${{ matrix.role }}
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ secrets.AGENT_GH_TOKEN }}
+      ROLE: ${{ matrix.role }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -36,47 +52,71 @@ jobs:
           git config user.name "paper-trading-agent"
           git config user.email "paper-trading-agent@users.noreply.github.com"
 
-      - name: Skip if an agent PR is already waiting
-        id: gate
-        env:
-          GH_TOKEN: ${{ github.token }}
+      # Cheap shell gate so we only start Claude when there is real work for this role:
+      # no open PR for the role, and a `status:todo` task whose dependencies are closed.
+      - name: Pick next ready task
+        id: pick
         run: |
-          open=$(gh pr list --label agent --state open --json number --jq 'length')
-          echo "open=$open" >> "$GITHUB_OUTPUT"
+          open=$(gh pr list --label agent --label "role:$ROLE" --state open --json number --jq 'length')
+          if [ "$open" -ge 1 ]; then
+            echo "role:$ROLE already has an open agent PR; skipping."
+            exit 0
+          fi
+          for n in $(gh issue list --state open --label task --label "role:$ROLE" --label status:todo \
+                       --limit 100 --json number --jq '[.[].number] | sort | .[]'); do
+            deps=$(gh issue view "$n" --json body --jq '.body' \
+                     | grep -i '^depends on:' | grep -o '#[0-9]\+' | tr -d '#' || true)
+            ready=true
+            for d in $deps; do
+              if [ "$(gh issue view "$d" --json state --jq '.state')" != "CLOSED" ]; then
+                ready=false; break
+              fi
+            done
+            if [ "$ready" = true ]; then
+              echo "issue=$n" >> "$GITHUB_OUTPUT"
+              gh issue edit "$n" --remove-label status:todo --add-label status:in-progress
+              echo "Picked #$n"
+              exit 0
+            fi
+          done
+          echo "No ready task for role:$ROLE."
 
       - uses: anthropics/claude-code-action@v1
-        if: steps.gate.outputs.open < 1
-        env:
-          GH_TOKEN: ${{ secrets.AGENT_GH_TOKEN }}
+        if: steps.pick.outputs.issue != ''
         with:
           # Set ONE of these two secrets (see SETUP.md); the other can stay unset.
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: |
-            You are the orchestrator for this repo. Follow CLAUDE.md strictly.
+            You are the `${{ matrix.agent }}` for this repo. Read CLAUDE.md, then read
+            .claude/agents/${{ matrix.agent }}.md and follow it as your own instructions.
+            Do the work yourself in this session; do not delegate to subagents.
 
-            IMPORTANT: this is a single, one-shot CI job. There is no way to resume or
-            wait after you end your turn — the workflow step (and the runner) finishes
-            the moment you stop responding. Delegate using the `Task` tool ONLY — never
-            the `Agent` tool. `Task` blocks and returns the subagent's full result to you
-            in the same turn; `Agent` launches the subagent asynchronously in the
-            background and returns immediately, which abandons the work the instant you
-            end your turn (this is exactly what went wrong on the previous run: it
-            called `Agent`, got "launched in the background", said "I'll wait for it",
-            and then ended its turn — the subagent never got to finish because there was
-            no next turn to resume it in). If `Task` is unavailable for some reason,
-            implement the task yourself directly instead of using `Agent`.
+            Your task is issue #${{ steps.pick.outputs.issue }}
+            (`gh issue view ${{ steps.pick.outputs.issue }} --comments`). It is already
+            labelled `status:in-progress`.
 
-            1. Read docs/PLAN.md. If the current milestone has no tasks, delegate to the
-               `planner` subagent via `Task`, then open its PR and stop.
-            2. Otherwise pick the first task with status `todo` whose dependencies are
-               `done` and that has no open PR. If none, stop.
-            3. Delegate it to the subagent named in its Role column via `Task`, and wait
-               for its result (which `Task` gives you directly — no polling needed).
-            4. Push the branch and open a PR with
-               `gh pr create --label agent --base main`. Never push to main, never merge.
-            5. End with a short summary of what was done, only after the PR is open.
+            1. Create branch `${{ matrix.role }}/<task-id>-<short-desc>` from main, where
+               <task-id> is the ID at the start of the issue title (e.g. M1-03).
+            2. Implement exactly that task, with tests. Run `make lint` and `make test`
+               until both pass.
+            3. If you discover extra work outside this task, do not do it. Open an issue
+               with `gh issue create --label needs-planning --label agent` describing it.
+            4. Push the branch and open the PR:
+               `gh pr create --base main --label agent --label role:${{ matrix.role }}`
+               with What / Why / How tested / Risks, and a line
+               `Closes #${{ steps.pick.outputs.issue }}`.
+            5. Label the issue: remove `status:in-progress`, add `status:in-review`.
+            Never push to main, never merge.
           claude_args: >-
             --max-turns 60
             --model sonnet
-            --allowedTools "Read,Edit,Write,Glob,Grep,Task,WebSearch,WebFetch,Bash(git:*),Bash(gh:*),Bash(make:*),Bash(python:*),Bash(python3:*),Bash(pip:*),Bash(uv:*),Bash(pytest:*),Bash(ruff:*),Bash(mypy:*),Bash(npm:*),Bash(npx:*),Bash(node:*),Bash(ls:*),Bash(mkdir:*),Bash(cat:*)"
+            --allowedTools "Read,Edit,Write,Glob,Grep,WebSearch,WebFetch,Bash(git:*),Bash(gh:*),Bash(make:*),Bash(python:*),Bash(python3:*),Bash(pip:*),Bash(uv:*),Bash(pytest:*),Bash(ruff:*),Bash(mypy:*),Bash(npm:*),Bash(npx:*),Bash(node:*),Bash(ls:*),Bash(mkdir:*),Bash(cat:*)"
+
+      # Don't leave a task stuck as in-progress if the run died before opening a PR.
+      - name: Release task on failure
+        if: failure() && steps.pick.outputs.issue != ''
+        run: |
+          n=${{ steps.pick.outputs.issue }}
+          gh issue edit "$n" --remove-label status:in-progress --add-label status:todo
+          gh issue comment "$n" --body "agent-work run failed before finishing; task returned to \`status:todo\`. Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

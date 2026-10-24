@@ -1,0 +1,78 @@
+# Quant gate: the quant-reviewer judges every strategy proposal issue before anyone
+# builds it. Approved -> label `proposal-approved` (triggers agent-plan.yml).
+# Rejected -> label `proposal-rejected` and the issue is closed.
+# Docs: https://code.claude.com/docs/en/github-actions
+name: agent-proposal-review
+
+on:
+  issues:
+    types: [opened, labeled]
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: "Proposal issue number to review"
+        required: true
+
+concurrency:
+  group: agent-proposal-review-${{ github.event.issue.number || inputs.issue }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+  id-token: write
+  actions: read
+
+jobs:
+  review:
+    # Only proposals that don't have a verdict yet.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (contains(github.event.issue.labels.*.name, 'proposal') &&
+       !contains(github.event.issue.labels.*.name, 'proposal-approved') &&
+       !contains(github.event.issue.labels.*.name, 'proposal-rejected'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # PAT so the verdict label triggers agent-plan.yml.
+      GH_TOKEN: ${{ secrets.AGENT_GH_TOKEN }}
+      ISSUE: ${{ github.event.issue.number || inputs.issue }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # `opened` and `labeled` can both fire for one new issue; the second run waits
+      # on the concurrency group and then sees the verdict here.
+      - name: Skip if already reviewed
+        id: gate
+        run: |
+          labels=$(gh issue view "$ISSUE" --json labels --jq '[.labels[].name] | join(",")')
+          case ",$labels," in
+            *,proposal-approved,*|*,proposal-rejected,*) echo "done=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "done=false" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - uses: anthropics/claude-code-action@v1
+        if: steps.gate.outputs.done == 'false'
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            You are the `quant-reviewer` for this repo, working in **proposal mode**.
+            Read CLAUDE.md, docs/GOAL.md and .claude/agents/quant-reviewer.md, then follow
+            its "Proposal mode" section. Do the work yourself; do not delegate.
+
+            Review strategy proposal issue #${{ env.ISSUE }}
+            (`gh issue view ${{ env.ISSUE }} --comments`). Compare against existing
+            strategies in docs/strategies/ and other proposals
+            (`gh issue list --label proposal --state all --limit 200`).
+
+            1. Post your review as an issue comment ending with exactly one line:
+               `VERDICT: APPROVE` or `VERDICT: REJECT`.
+            2. If APPROVE: `gh issue edit ${{ env.ISSUE }} --add-label proposal-approved`.
+               If REJECT: `gh issue edit ${{ env.ISSUE }} --add-label proposal-rejected`
+               then `gh issue close ${{ env.ISSUE }} --reason "not planned"`.
+            Do not edit repo files.
+          claude_args: >-
+            --max-turns 25
+            --model opus
+            --allowedTools "Read,Glob,Grep,WebSearch,WebFetch,Bash(gh:*),Bash(ls:*),Bash(cat:*)"
