@@ -5,8 +5,10 @@
 name: agent-proposal-review
 
 on:
+  # Only `opened`: the researcher sets the `proposal` label at creation. Listening to
+  # `labeled` too would start a (skipped) run for every label on every issue.
   issues:
-    types: [opened, labeled]
+    types: [opened]
   workflow_dispatch:
     inputs:
       issue:
@@ -40,8 +42,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # `opened` and `labeled` can both fire for one new issue; the second run waits
-      # on the concurrency group and then sees the verdict here.
+      # A manual re-run on an issue that already has a verdict does nothing.
       - name: Skip if already reviewed
         id: gate
         run: |
@@ -56,6 +57,9 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Proposal issues are opened by the claude[bot] identity; without this the
+          # action refuses to run ("Workflow initiated by non-human actor").
+          allowed_bots: "claude[bot]"
           prompt: |
             You are the `quant-reviewer` for this repo, working in **proposal mode**.
             Read CLAUDE.md, docs/GOAL.md and .claude/agents/quant-reviewer.md, then follow

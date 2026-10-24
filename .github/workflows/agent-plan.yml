@@ -13,11 +13,6 @@ on:
     - cron: "5 6 * * *"   # daily at 06:05 UTC
   workflow_dispatch: {}
 
-# One planner at a time so two runs never create duplicate tasks.
-concurrency:
-  group: agent-plan
-  cancel-in-progress: false
-
 permissions:
   contents: write
   pull-requests: write
@@ -33,6 +28,11 @@ jobs:
       github.event.label.name == 'needs-planning'
     runs-on: ubuntu-latest
     timeout-minutes: 40
+    # One planner at a time so two runs never create duplicate tasks. Job-level (not
+    # workflow-level) so the many label events that skip this job don't queue or cancel.
+    concurrency:
+      group: agent-plan
+      cancel-in-progress: false
     env:
       GH_TOKEN: ${{ secrets.AGENT_GH_TOKEN }}
     steps:
@@ -50,6 +50,8 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Approvals and needs-planning labels come from the claude[bot] identity.
+          allowed_bots: "claude[bot]"
           prompt: |
             You are the `planner` for this repo. Read CLAUDE.md, docs/GOAL.md,
             docs/PLAN.md and .claude/agents/planner.md, and follow it as your own
