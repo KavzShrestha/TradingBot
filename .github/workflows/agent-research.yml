@@ -1,0 +1,63 @@
+# Research loop: the strategy-researcher reads papers / articles / market news and opens
+# ONE strategy proposal issue per run. Opening the issue triggers agent-proposal-review.yml
+# (quant-reviewer), and an approved proposal triggers agent-plan.yml (planner).
+# Docs: https://code.claude.com/docs/en/github-actions
+name: agent-research
+
+on:
+  schedule:
+    - cron: "41 9 * * 1,3,5"   # Mon / Wed / Fri at 09:41 UTC
+  workflow_dispatch: {}
+
+concurrency:
+  group: agent-research
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+  id-token: write
+  actions: read
+
+env:
+  MAX_OPEN_PROPOSALS: 3   # cost cap: stop proposing while this many are waiting
+
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # PAT so the issue this run opens triggers agent-proposal-review.yml.
+      GH_TOKEN: ${{ secrets.AGENT_GH_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Skip if enough proposals are already waiting
+        id: gate
+        run: |
+          waiting=$(gh issue list --state open --label proposal --json number --jq 'length')
+          echo "waiting=$waiting" >> "$GITHUB_OUTPUT"
+          echo "$waiting open proposal(s); cap is $MAX_OPEN_PROPOSALS."
+
+      - uses: anthropics/claude-code-action@v1
+        if: steps.gate.outputs.waiting < fromJSON(env.MAX_OPEN_PROPOSALS)
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            You are the `strategy-researcher` for this repo, working in **proposal mode**.
+            Read CLAUDE.md, docs/GOAL.md (instruments, bar sizes), and
+            .claude/agents/strategy-researcher.md, then follow its "Proposal mode"
+            section. Do the work yourself; do not delegate to subagents.
+
+            Before proposing, check for duplicates: `ls docs/strategies/` and
+            `gh issue list --label proposal --state all --limit 200`.
+
+            Open exactly ONE issue:
+            `gh issue create --label proposal --label agent --title "proposal: <name>" --body-file <file>`
+            using the proposal template in your agent file. Do not edit any repo files
+            and do not open a PR.
+          claude_args: >-
+            --max-turns 30
+            --model sonnet
+            --allowedTools "Read,Write,Glob,Grep,WebSearch,WebFetch,Bash(gh:*),Bash(ls:*),Bash(cat:*)"

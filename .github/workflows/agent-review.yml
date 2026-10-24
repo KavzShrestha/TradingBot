@@ -86,10 +86,16 @@ jobs:
             2. If the diff touches backend/app/strategies, engine, portfolio or backtest,
                also run the `quant-reviewer` subagent via `Task`.
             3. Post each review as a PR comment (`gh pr comment`), including its VERDICT line.
+               Findings that are real but outside this PR's task must not block it: open
+               one issue for them with
+               `gh issue create --label needs-planning --label agent` so the planner
+               schedules the follow-up work.
             4. If any verdict is REQUEST CHANGES and fewer than 1 fix round has been
                done (done so far: ${{ steps.rounds.outputs.n }}), first add the label
                `fix-round-1`, then delegate the fixes via `Task` to the subagent that
-               owns the PR's branch prefix and push the fixes to the same branch.
+               owns the PR's branch prefix (`backend/` -> backend-engineer,
+               `frontend/` -> frontend-engineer, `strategy/` -> strategy-researcher,
+               `plan/` -> planner) and push the fixes to the same branch.
             5. If both verdicts are APPROVE, add the label `ready-for-human`.
                Otherwise, if the fix round is already used up, add `needs-human`.
             Never merge.

@@ -2,23 +2,36 @@
 
 ## How it works
 
+The agents run in parallel as separate GitHub Actions workflows and talk to each other
+through GitHub Issues, labels and PRs (the "task board", see CLAUDE.md):
+
 ```
- once/day            agent-work.yml                     agent-review.yml (on PR)
- ─────────▶  orchestrator reads PLAN.md ──▶ subagent ──▶ PR ──▶ CI ──▶ code-reviewer
-                                                                        quant-reviewer
-                                                        ▲                    │
-                                                        └── fixes (max 1) ◀──┘
-                                                                             │
-                                                     label: ready-for-human / needs-human
-                                                                             ▼
-                                                                    YOU review + merge
+ Mon/Wed/Fri       agent-research.yml          agent-proposal-review.yml       agent-plan.yml
+ ──────────▶ strategy-researcher ──issue──▶ quant-reviewer ──approved──▶ planner ──task issues──┐
+             (papers, news → 1 proposal)    (APPROVE / REJECT)            (also daily, and on    │
+                                                                           `needs-planning`)     │
+   ┌─────────────────────────────────────────────────────────────────────────────────────────┘
+   ▼  agent-work.yml (every 4h, on every merge to main, and when the planner adds tasks)
+ backend-engineer ┐
+ frontend-engineer├─ in parallel, one open PR per role ──▶ PR ──▶ agent-review.yml ──▶ YOU merge
+ strategy-research┘                                            (code + quant review,     │
+                                                                1 fix round; follow-ups  │
+                                                                → `needs-planning`)      │
+        ▲                                                                                │
+        └──────────────── merge closes the task issue and unblocks the next ◀────────────┘
 ```
 
-- **Orchestrator:** the main Claude session. In GitHub it's the prompt in
-  `agent-work.yml`; locally it's the Claude Code chat you're talking to. It reads the plan
-  and delegates to the subagents in `.claude/agents/`.
+| Workflow | Agent | Runs when |
+|---|---|---|
+| `agent-research.yml` | strategy-researcher | Mon/Wed/Fri, if fewer than 3 proposals are waiting |
+| `agent-proposal-review.yml` | quant-reviewer (Opus) | a `proposal` issue is opened |
+| `agent-plan.yml` | planner | a proposal is approved, an issue is labelled `needs-planning`, daily |
+| `agent-work.yml` | backend / frontend / strategy (one job each) | every 4h, on merge to `main`, after planning |
+| `agent-review.yml` | code-reviewer + quant-reviewer | an agent PR is opened or updated |
+
 - **You** own `docs/GOAL.md`, the workflows and the merge button. Agents own everything
-  else through PRs.
+  else through issues and PRs. Steer by editing/closing issues, or by opening an issue
+  labelled `needs-planning` describing what you want.
 
 ---
 
@@ -65,16 +78,20 @@ an agent makes the same mistake twice, add a rule to CLAUDE.md.
    https://code.claude.com/docs/en/github-actions#manual-setup
 2. **Agent token:** create a fine-grained personal access token (GitHub → Settings →
    Developer settings) for this repo only, with Contents, Pull requests and Issues set to
-   read/write. Save it as the repo secret `AGENT_GH_TOKEN`. Without it, PRs opened by the
-   worker won't trigger the review workflow.
+   read/write, and **Actions** read/write (lets the planner start the workers right
+   away). Save it as the repo secret `AGENT_GH_TOKEN`. Without it, issues and PRs opened
+   by agents won't trigger the next agent's workflow.
 3. **Labels:**
    ```bash
-   for l in agent ready-for-human needs-human fix-round-1 question; do gh label create "$l"; done
+   for l in agent ready-for-human needs-human fix-round-1 question             task role:backend role:frontend role:strategy             status:todo status:in-progress status:in-review status:blocked             proposal proposal-approved proposal-rejected planned needs-planning             milestone:M1 milestone:M2 milestone:M3 milestone:M4 milestone:M5 milestone:M6 milestone:M7; do
+     gh label create "$l" --force
+   done
    ```
 4. **Protect main:** Settings → Branches → add a rule for `main`: require a pull request,
    require the `checks` status check, block force pushes.
-5. **Test it:** Actions tab → `agent-work` → "Run workflow". Watch it live by clicking the
-   run, then the `work` job.
+5. **Test it:** Actions tab → `agent-plan` → "Run workflow". The planner creates the M1
+   task issues and then starts `agent-work`. To start the research loop right away, also
+   run `agent-research`. Watch any run live by clicking it, then its job.
 
 ## Where to watch the agents
 
@@ -84,20 +101,24 @@ an agent makes the same mistake twice, add a rule to CLAUDE.md.
 | Automated runs, live | GitHub → Actions tab → click the run → expand the Claude step |
 | Reviews and verdicts | Comments on each PR |
 | What needs you | PRs filtered by label `ready-for-human` or `needs-human` |
-| Overall progress | Task statuses in `docs/PLAN.md` |
+| Overall progress | Issues tab, filter `label:task` (group by `status:*`) |
+| Strategy ideas and verdicts | Issues tab, filter `label:proposal` (open and closed) |
 
 ## Your daily loop (about 10 minutes)
 
 1. Open PRs labelled `ready-for-human` or `needs-human`.
 2. Read the reviewers' summaries, then the diff. For strategy PRs, open the backtest report.
 3. Merge, comment `@claude <what to change>`, or close.
-4. At the start of each milestone, merge (or edit) the planner's `plan:` PR; this is where
-   you steer.
+4. Skim new `proposal` issues and the quant-reviewer's verdicts. To overrule a verdict,
+   change the label (`proposal-approved` starts planning).
+5. Skim new `task` issues from the planner; edit or close any you disagree with.
 
 ## Cost controls already in place
 
-One task per day, one open agent PR at a time, one fix round, turn caps, and Sonnet as the
-default model. Set a monthly spend limit in the Anthropic Console if you use an API key.
+One open agent PR per role (max 3 at once), at most 3 waiting proposals, research three
+times a week, workers that exit before calling Claude when no task is ready, one fix
+round, turn caps, Sonnet everywhere except the quant-reviewer (Opus). The worker
+schedule (`17 */4 * * *` in `agent-work.yml`) is the main cost dial. Set a monthly spend limit in the Anthropic Console if you use an API key.
 GitHub Actions minutes are separate (private repos get a free monthly allowance).
 
 ## Troubleshooting
