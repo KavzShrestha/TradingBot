@@ -110,17 +110,22 @@ is evaluated independently.
   pro-rata cut below. At fill time the actual fill is
   `open_{t+1} * (1 + slippage_bps/10000)` for buys and `open_{t+1} * (1 - slippage_bps/10000)`
   for sells.
-- **Sizing order (buys):** (1) `target_value` = 1/K of equity at close of t, **capped at
-  cash available at signal time minus the commission** (cash after any sells pending on
-  the same bar is not counted, since proceeds are only known at fill; the fill-time
-  pro-rata cut handles that); (2) `qty = (target_value - commission) / est`; (3) pro-rata
-  cut at fill time if cash is short; (4) round down to whole shares last.
-  Rounding is applied once, after the cut.
+- **Sizing order (buys):**
+  1. `target_value` = 1/K of equity at close of t.
+  2. Budget: `budget = min(target_value, cash_t + S) - commission`, where `cash_t` is cash
+     at signal time and `S` is the estimated net proceeds of sells emitted on the same bar:
+     `S = sum(qty_i * close_t * (1 - slippage_bps/10000) - commission)` over those sells.
+     Sells fill first (see below), so their proceeds are available to the buy. **This is
+     the only step that subtracts the buy's commission** (once, whether or not the cap
+     binds).
+  3. `qty = budget / est`, where `est` is the slipped price estimate above (no further
+     commission term).
+  4. Fill-time safety net: if actual cash at fill (after sells fill) cannot pay for all
+     pending buys including commissions (e.g. gap-up opens), cut every buy **pro rata** by
+     the same factor so the total never exceeds cash. No leverage. Rounding down to whole
+     shares is applied once, last, after the cut.
 - **Order of execution on one bar:** sells are filled before buys, so sale proceeds are
   available to the buys.
-- **Cash shortfall:** if cash at fill time is insufficient for all pending buys (e.g.
-  gap-up opens), every buy is cut **pro rata** by the same factor (then rounded down to
-  whole shares) so the total never exceeds cash. No leverage.
 
 ### Sizing and gross exposure
 
@@ -155,6 +160,29 @@ Bar size: daily.
   tuned parameter and add configurations.
 - The out-of-sample period is run once per reported configuration and never used to choose.
 
+## Risk limits (fixed for all backtest runs)
+
+CLAUDE.md requires per-strategy risk limits. The backtest task (M4-02) must set exactly
+these values explicitly for the strategy and both benchmarks, not rely on defaults:
+
+| Limit | Value |
+|---|---|
+| Max position size | 25% of equity per instrument at entry (K=5 sizes entries at 20%; 25% leaves headroom for drift between flips and never blocks a normal entry) |
+| Max gross exposure | 1.0x equity, no leverage, no shorting |
+| Daily loss limit | **Disabled** (set to 100% / no halt) for all backtest runs, so that a halt cannot decide criteria 1-3. A flat-or-long daily SMA rule has no stop of its own, and a halt that forces flat in a selloff would silently change the result. |
+| Halt duration | Not applicable while the daily loss limit is disabled |
+| Global kill switch | Off throughout every backtest |
+
+- The **benchmarks run under the same limits** as the strategy (same position cap,
+  gross cap and disabled loss limit), so comparisons are like for like.
+- Max position size and gross cap **may still block or cut an order**. The report must
+  list **every halt and every risk-limit block or cut** (date, instrument, limit, requested
+  vs executed quantity), or state explicitly that there were none. Any pro-rata cut also
+  appears in this list.
+- Live paper mode may configure a non-disabled daily loss limit. If so, the backtest
+  report must also include one supplementary run with that limit enabled, labeled
+  non-gating, so the effect of a halt is visible. It is not used for criteria 1-3.
+
 ## Costs, data and price adjustment (fixed for all runs)
 
 - **Costs:** slippage 5 bps per fill and commission $1.00 per trade (fill), i.e. the
@@ -171,12 +199,11 @@ Bar size: daily.
   prices, and no separate dividend cash flow is modelled: dividends are implicitly
   reinvested while the instrument is held and not earned while flat. The benchmarks use
   the same adjusted prices, so **within the backtest** strategy and benchmarks are
-  treated identically. **Live paper mode differs:** the ledger does not credit cash on
-  ex-dates (no corporate-action handling yet), so live P&L will trail the backtest by
-  roughly the held instruments' dividend yield (e.g. TLT's) until the ledger supports
-  corporate actions. Live-vs-backtest comparisons must adjust for this (compare against a
-  live buy-and-hold run, not against backtest levels). Corporate-action handling in the
-  ledger is deferred to a needs-planning issue. The same
+  treated identically. **Live paper mode differs:** the ledger has no corporate-action
+  handling (neither dividends nor splits; tracked in #35), so live P&L will trail the
+  backtest by roughly the held instruments' dividend yield (e.g. TLT's), and a split would
+  corrupt live positions. Live-vs-backtest comparisons must compare against a live
+  buy-and-hold run, not against backtest levels. The same
   `adjustment` setting is used in live paper mode and in backtests. Caveat: adjusted
   history is restated after each distribution, so a backtest run later sees slightly
   different levels than a signal computed live on the day; the report records the fetch
@@ -237,13 +264,19 @@ Evaluated on the equal-weight 5-ETF portfolio, after slippage and commission.
   bear markets (2020, 2022) fall in-sample and the OOS period may contain no bear market
   at all. The report must (a) list the drawdown episodes (peak, trough, depth,
   duration) of the equal-weight buy-and-hold for the in-sample and the OOS period
-  separately, and (b) state the number of OOS month-end decisions (about 36 expected).
+  separately, and (b) state the number of OOS month-end decisions. Compute the split from the recorded
+  first IEX bar date per symbol (not from an assumed 2016 start); if history is shorter
+  than assumed, the OOS span and decision count shrink, so restate them (about 36 only if
+  IEX history starts in 2016).
   **Pre-registered informativeness rule:** criterion 1 is *uninformative* if the OOS
   equal-weight buy-and-hold max drawdown is **< 10.0%** (exact threshold, measured on the
   rebased OOS daily equity curve after costs). Consequence, fixed in advance: if
   uninformative, criterion 1 is reported but neither counts as passed nor failed; enabling
   in live paper mode then requires criteria 2 and 3 to pass, and the report must state
-  explicitly that there is no OOS drawdown evidence for the strategy.
+  explicitly that there is no OOS drawdown evidence for the strategy. In that case the
+  report must also give **in-sample criterion 1** for the default as supplementary,
+  **non-gating** evidence (the in-sample period contains the 2020 and 2022 drawdowns); it
+  cannot pass or fail the strategy.
 - **Risk-free rate and annualization:** Sharpe uses rf = 0% (consistent with cash earning
   nothing) and an annualization factor of sqrt(252) on daily returns. The report states both.
 
@@ -283,7 +316,9 @@ fall inside our data (plus the 2018 Q4 drawdown), and all of these are likely in
 ## Known failure modes
 
 - **Whipsaw** in range-bound markets: repeated false crosses, each paying slippage and
-  commission. Much worse for the daily variant (clusters in e.g. 2018 and 2022).
+  commission. Much worse for the daily variant (clusters in e.g. 2018 and 2022). Evidence on this is limited by the short sample
+  (about two bear episodes), so the whipsaw cost of the daily variant is only roughly
+  measurable here.
 - **Late re-entry** after sharp V-shaped recoveries (e.g. March 2020). The month-end
   variant can lag by up to a month on top of the SMA lag itself.
 - **Lag:** exits only after a decline of roughly 5-15%.
