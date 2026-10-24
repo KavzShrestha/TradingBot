@@ -31,6 +31,45 @@ main {
   font-weight: 600;
 }
 
+.paper-banner {
+  padding: 8px 12px;
+  margin-bottom: 16px;
+  border: 1px solid var(--accent-border);
+  background: var(--accent-bg);
+  border-radius: 6px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-align: center;
+}
+
+.strategy-card h3 {
+  margin: 16px 0 0;
+}
+
+.equity-curve-chart {
+  margin: 0;
+}
+
+.equity-curve-chart svg {
+  width: 100%;
+  height: auto;
+}
+
+.chart-line {
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+.chart-grid {
+  stroke: var(--border);
+}
+
+.chart-tick,
+.chart-label {
+  fill: var(--text);
+  font-size: 11px;
+}
+
 .positions-table {
   width: 100%;
   border-collapse: collapse;
