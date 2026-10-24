@@ -11,4 +11,8 @@ Config (`.env`): `DATA_API_KEY`, `DATA_API_SECRET`, `MARKET_DATA_URL`
 `LIVE_ENDPOINT_DENYLIST` both in the client and at startup. Bar timestamps are bar
 start times in UTC; prices are parsed straight to `Decimal`.
 
-Out of scope: caching, streaming, gap detection. IEX volume is a subset of consolidated volume.
+Caching: `app/data/cache.py` (`BarCache`, SQLite under `data/cache/`) wraps any bar fetcher
+and only fetches uncovered ranges. Coverage stops at the last fully closed bar, so the
+still-forming bar is never cached. A truncated fetcher result is treated as covered for good.
+
+Out of scope: streaming, gap detection. IEX volume is a subset of consolidated volume.

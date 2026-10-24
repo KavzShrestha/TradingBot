@@ -3,8 +3,18 @@
 Bars are keyed by (symbol, timeframe, timestamp). Because a closed-market period
 legitimately returns no bars, the cache also records which time ranges have already
 been fetched ("coverage"); only uncovered sub-ranges are passed to the injected fetcher.
-Prices are stored as `Decimal` strings so they round-trip exactly. Coverage never extends
-past "now", so a still-forming range is re-fetched on the next call.
+Prices are stored as `Decimal` strings so they round-trip exactly.
+
+Bars are stamped with their open time, so a bar is only final once
+`timestamp + timeframe duration <= now`. Coverage is clamped to the last fully closed bar
+(`now - duration`) and bars after that point (the still-forming bar) are neither stored
+nor marked covered; they are re-fetched on the next call.
+
+Limitation: whatever the fetcher returns for a closed range is permanently treated as
+covered. If the fetcher truncates its result (e.g. a page limit), the missing bars are
+never re-fetched; fetchers must return the complete range.
+
+`BarCache` is a context manager; use `with BarCache(...) as cache:` to close the connection.
 
 The default location `data/cache/` is gitignored.
 """
@@ -13,7 +23,7 @@ from __future__ import annotations
 
 import sqlite3
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -44,6 +54,14 @@ CREATE TABLE IF NOT EXISTS coverage (
     PRIMARY KEY (symbol, timeframe, start_ts)
 );
 """
+
+_DURATION = {
+    Timeframe.MIN_1: timedelta(minutes=1),
+    Timeframe.MIN_5: timedelta(minutes=5),
+    Timeframe.MIN_15: timedelta(minutes=15),
+    Timeframe.HOUR_1: timedelta(hours=1),
+    Timeframe.DAY_1: timedelta(days=1),
+}
 
 _TS_FORMAT = "%Y-%m-%dT%H:%M:%S.%f"
 
@@ -81,6 +99,12 @@ class BarCache:
 
     def close(self) -> None:
         self._conn.close()
+
+    def __enter__(self) -> BarCache:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
 
     def get_bars(
         self,
@@ -143,7 +167,9 @@ class BarCache:
                 raise ValueError("fetcher returned a bar for a different symbol/timeframe")
             if not start <= bar.timestamp <= end:
                 raise ValueError("fetcher returned a bar outside the requested range")
-        covered_end = min(end, self._clock().astimezone(UTC))
+        last_closed_open = self._clock().astimezone(UTC) - _DURATION[timeframe]
+        covered_end = min(end, last_closed_open)
+        bars = [b for b in bars if b.timestamp <= covered_end]
         with self._conn:
             self._conn.executemany(
                 "INSERT OR REPLACE INTO bars VALUES (?,?,?,?,?,?,?,?)",

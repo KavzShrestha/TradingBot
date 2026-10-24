@@ -1,3 +1,4 @@
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -46,8 +47,9 @@ class FakeFetcher:
 
 
 @pytest.fixture
-def cache(tmp_path: Path) -> BarCache:
-    return BarCache(tmp_path, clock=lambda: NOW)
+def cache(tmp_path: Path) -> Iterator[BarCache]:
+    with BarCache(tmp_path, clock=lambda: NOW) as c:
+        yield c
 
 
 def test_miss_then_hit_calls_fetcher_once(cache: BarCache) -> None:
@@ -118,18 +120,48 @@ def test_persists_across_instances(tmp_path: Path) -> None:
     c1 = BarCache(tmp_path, clock=lambda: NOW)
     c1.get_bars("SPY", TF, day(0), day(4), f)
     c1.close()
-    c2 = BarCache(tmp_path, clock=lambda: NOW)
-    assert len(c2.get_bars("SPY", TF, day(0), day(4), f)) == 5
+    with BarCache(tmp_path, clock=lambda: NOW) as c2:
+        assert len(c2.get_bars("SPY", TF, day(0), day(4), f)) == 5
     assert len(f.calls) == 1
 
 
 def test_future_range_not_marked_covered(tmp_path: Path) -> None:
-    cache = BarCache(tmp_path, clock=lambda: day(5))
-    f = FakeFetcher()
-    cache.get_bars("SPY", TF, day(0), day(9), f)
-    f.calls.clear()
-    cache.get_bars("SPY", TF, day(0), day(9), f)
-    assert [(c[2], c[3]) for c in f.calls] == [(day(5), day(9))]
+    with BarCache(tmp_path, clock=lambda: day(5)) as cache:
+        f = FakeFetcher()
+        cache.get_bars("SPY", TF, day(0), day(9), f)
+        f.calls.clear()
+        cache.get_bars("SPY", TF, day(0), day(9), f)
+        # day(4) is the last bar that has closed at day(5) 00:00.
+        assert [(c[2], c[3]) for c in f.calls] == [(day(4), day(9))]
+
+
+def test_forming_bar_mid_bar_not_stored_or_covered(tmp_path: Path) -> None:
+    now = [day(5) + timedelta(hours=12)]
+    with BarCache(tmp_path, clock=lambda: now[0]) as cache:
+        f = FakeFetcher()
+        got = cache.get_bars("SPY", TF, day(0), day(9), f)
+        # day(5) is still forming at noon: it must not be served from the cache.
+        assert [b.timestamp for b in got] == [day(n) for n in range(5)]
+        f.calls.clear()
+        now[0] = day(6) + timedelta(hours=1)
+        got = cache.get_bars("SPY", TF, day(0), day(9), f)
+        assert [(c[2], c[3]) for c in f.calls] == [(day(4), day(9))]
+        assert [b.timestamp for b in got] == [day(n) for n in range(6)]
+
+
+def test_forming_bar_replaced_with_final_on_refetch(tmp_path: Path) -> None:
+    now = [day(5) + timedelta(hours=12)]
+    close = {"v": "10.15"}
+
+    def fetcher(s: str, tf: Timeframe, a: datetime, b: datetime) -> list[Bar]:
+        return [bar(n, close=close["v"]) for n in range(10) if a <= day(n) <= b]
+
+    with BarCache(tmp_path, clock=lambda: now[0]) as cache:
+        cache.get_bars("SPY", TF, day(0), day(9), fetcher)
+        close["v"] = "10.18"
+        now[0] = day(6) + timedelta(hours=1)
+        got = cache.get_bars("SPY", TF, day(0), day(9), fetcher)
+        assert got[5].close == Decimal("10.18")
 
 
 def test_non_utc_inputs_are_normalized(cache: BarCache) -> None:
