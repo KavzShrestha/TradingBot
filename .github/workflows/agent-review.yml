@@ -83,8 +83,10 @@ jobs:
             to resume it in.
 
             1. Run the `code-reviewer` subagent on the diff via `Task`.
-            2. If the diff touches backend/app/strategies, engine, portfolio or backtest,
-               also run the `quant-reviewer` subagent via `Task`.
+            2. Also run the `quant-reviewer` subagent via `Task` if the PR branch starts
+               with `strategy/`, or the diff touches docs/strategies/, reports/, or
+               backend/app/strategies, engine, portfolio or backtest. Strategy specs
+               count: they define the trading rules the code will implement.
             3. Post each review as a PR comment (`gh pr comment`), including its VERDICT line.
                Findings that are real but outside this PR's task must not block it: open
                one issue for them with
