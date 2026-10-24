@@ -8,7 +8,7 @@ on:
   schedule:
     - cron: "17 */4 * * *"   # every 4 hours
   push:
-    branches: [main]         # a merge may have unblocked dependent tasks
+    branches: [main]         # a merge may have unblocked tasks; see `redispatch` below
   workflow_dispatch: {}      # manual run from the Actions tab (also used by agent-plan)
 
 permissions:
@@ -16,10 +16,22 @@ permissions:
   pull-requests: write
   issues: write
   id-token: write
-  actions: read
+  actions: write
 
 jobs:
+  # claude-code-action rejects `push` events ("Unsupported event type: push"), so a merge
+  # just re-starts this workflow as a workflow_dispatch run. GITHUB_TOKEN may trigger
+  # workflow_dispatch (unlike most events), so no PAT is needed here.
+  redispatch:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run agent-work.yml --ref main --repo "${{ github.repository }}"
+
   work:
+    if: github.event_name != 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:

@@ -67,8 +67,10 @@ jobs:
 
       # Start the workers now instead of waiting for the next 4-hourly tick.
       # The workers' own gate exits cheaply if nothing is ready.
-      # Needs Actions: read/write on AGENT_GH_TOKEN; harmless if missing (the schedule
-      # still picks the tasks up).
+      # GITHUB_TOKEN (with actions: write) may trigger workflow_dispatch, so this
+      # doesn't depend on the PAT's permissions.
       - name: Kick workers
         continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: gh workflow run agent-work.yml --ref main
