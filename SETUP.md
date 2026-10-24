@@ -78,8 +78,7 @@ an agent makes the same mistake twice, add a rule to CLAUDE.md.
    https://code.claude.com/docs/en/github-actions#manual-setup
 2. **Agent token:** create a fine-grained personal access token (GitHub → Settings →
    Developer settings) for this repo only, with Contents, Pull requests and Issues set to
-   read/write, and **Actions** read/write (lets the planner start the workers right
-   away). Save it as the repo secret `AGENT_GH_TOKEN`. Without it, issues and PRs opened
+   read/write. Save it as the repo secret `AGENT_GH_TOKEN`. Without it, issues and PRs opened
    by agents won't trigger the next agent's workflow.
 3. **Labels:**
    ```bash
