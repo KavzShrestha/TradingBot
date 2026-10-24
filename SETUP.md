@@ -15,7 +15,7 @@ through GitHub Issues, labels and PRs (the "task board", see CLAUDE.md):
  backend-engineer ┐
  frontend-engineer├─ in parallel, one open PR per role ──▶ PR ──▶ agent-review.yml ──▶ YOU merge
  strategy-research┘                                            (code + quant review,     │
-                                                                1 fix round; follow-ups  │
+                                                                ≤3 fix rounds; follow-ups│
                                                                 → `needs-planning`)      │
         ▲                                                                                │
         └──────────────── merge closes the task issue and unblocks the next ◀────────────┘
@@ -83,7 +83,11 @@ an agent makes the same mistake twice, add a rule to CLAUDE.md.
    by agents won't trigger the next agent's workflow.
 3. **Labels:**
    ```bash
-   for l in agent ready-for-human needs-human fix-round-1 question             task role:backend role:frontend role:strategy             status:todo status:in-progress status:in-review status:blocked             proposal proposal-approved proposal-rejected planned needs-planning             milestone:M1 milestone:M2 milestone:M3 milestone:M4 milestone:M5 milestone:M6 milestone:M7; do
+   for l in agent ready-for-human needs-human fix-round-1 fix-round-2 fix-round-3 question \
+            task role:backend role:frontend role:strategy \
+            status:todo status:in-progress status:in-review status:blocked \
+            proposal proposal-approved proposal-rejected planned needs-planning \
+            milestone:M1 milestone:M2 milestone:M3 milestone:M4 milestone:M5 milestone:M6 milestone:M7; do
      gh label create "$l" --force
    done
    ```
@@ -116,8 +120,9 @@ an agent makes the same mistake twice, add a rule to CLAUDE.md.
 ## Cost controls already in place
 
 One open agent PR per role (max 3 at once), at most 3 waiting proposals, research three
-times a week, workers that exit before calling Claude when no task is ready, one fix
-round, turn caps, Sonnet everywhere except the quant-reviewer (Opus). The worker
+times a week, workers that exit before calling Claude when no task is ready, up to 3
+review/fix rounds per PR (`MAX_FIX_ROUNDS` in `agent-review.yml`), turn caps, Sonnet everywhere except the
+quant-reviewer (Opus). The worker
 schedule (`17 */4 * * *` in `agent-work.yml`) is the main cost dial. Set a monthly spend limit in the Anthropic Console if you use an API key.
 GitHub Actions minutes are separate (private repos get a free monthly allowance).
 
