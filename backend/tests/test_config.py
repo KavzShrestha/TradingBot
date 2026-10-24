@@ -29,3 +29,8 @@ def test_settings_from_env_reads_overrides(monkeypatch: pytest.MonkeyPatch) -> N
     settings = Settings.from_env()
     assert settings.paper_trading is False
     assert settings.starting_capital == Decimal("5000")
+
+
+def test_market_data_url_on_denylist_is_refused() -> None:
+    with pytest.raises(RuntimeError, match="MARKET_DATA_URL"):
+        Settings(market_data_url="https://api.alpaca.markets").validate_paper_trading_safe()
