@@ -73,6 +73,7 @@ class Settings(BaseModel):
     data_api_key: str = ""
     data_api_secret: str = ""
     data_base_url: str = "https://paper-api.alpaca.markets"
+    market_data_url: str = "https://data.alpaca.markets"
     starting_capital: Decimal = Decimal("100000")
     slippage_bps: Decimal = Decimal("5")
     commission_per_trade: Decimal = Decimal("1.00")
@@ -88,6 +89,7 @@ class Settings(BaseModel):
             data_api_key=os.getenv("DATA_API_KEY", ""),
             data_api_secret=os.getenv("DATA_API_SECRET", ""),
             data_base_url=os.getenv("DATA_BASE_URL", "https://paper-api.alpaca.markets"),
+            market_data_url=os.getenv("MARKET_DATA_URL", "https://data.alpaca.markets"),
             starting_capital=Decimal(os.getenv("STARTING_CAPITAL", "100000")),
             slippage_bps=Decimal(os.getenv("SLIPPAGE_BPS", "5")),
             commission_per_trade=Decimal(os.getenv("COMMISSION_PER_TRADE", "1.00")),
@@ -107,6 +109,11 @@ class Settings(BaseModel):
                 f"paper_trading={self.paper_trading!r}). Set PAPER_TRADING=true "
                 "in the environment or .env file. This application must never "
                 "place real-money orders."
+            )
+        if _is_live_endpoint(self.market_data_url):
+            raise RuntimeError(
+                f"Refusing to start: MARKET_DATA_URL '{self.market_data_url}' is a "
+                "live/production endpoint on the denylist in app/config.py."
             )
         if _is_live_endpoint(self.data_base_url):
             raise RuntimeError(
