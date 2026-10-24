@@ -1,5 +1,6 @@
 # Runs both reviewer subagents on every agent PR, then lets the implementer fix
-# requested changes, 1 round only (to limit cost). After that, the PR waits for you.
+# requested changes, up to MAX_FIX_ROUNDS rounds (to limit cost). After that, the PR
+# waits for you.
 # Docs: https://code.claude.com/docs/en/github-actions
 name: agent-review
 
@@ -33,6 +34,8 @@ jobs:
 
   review:
     needs: checks
+    env:
+      MAX_FIX_ROUNDS: 3   # review <-> fix cycles before the PR waits for you
     # Only agent PRs. On "labeled" events, only react to the `agent` label itself,
     # so adding fix-round / ready-for-human labels doesn't start another review.
     if: >-
@@ -52,6 +55,8 @@ jobs:
           git config user.name "paper-trading-agent"
           git config user.email "paper-trading-agent@users.noreply.github.com"
 
+      # Each fix push re-triggers this workflow (`synchronize`), so reviewer and author
+      # go back and forth automatically until approval or this many rounds.
       - name: Count previous fix rounds
         id: rounds
         env:
@@ -92,14 +97,24 @@ jobs:
                one issue for them with
                `gh issue create --label needs-planning --label agent` so the planner
                schedules the follow-up work.
-            4. If any verdict is REQUEST CHANGES and fewer than 1 fix round has been
-               done (done so far: ${{ steps.rounds.outputs.n }}), first add the label
-               `fix-round-1`, then delegate the fixes via `Task` to the subagent that
-               owns the PR's branch prefix (`backend/` -> backend-engineer,
-               `frontend/` -> frontend-engineer, `strategy/` -> strategy-researcher,
-               `plan/` -> planner) and push the fixes to the same branch.
-            5. If both verdicts are APPROVE, add the label `ready-for-human`.
-               Otherwise, if the fix round is already used up, add `needs-human`.
+            4. If any verdict is REQUEST CHANGES and fewer than ${{ env.MAX_FIX_ROUNDS }}
+               fix rounds have been done (done so far: ${{ steps.rounds.outputs.n }}):
+               a. Add the label `fix-round-<done so far + 1>` and remove `needs-human`
+                  if present.
+               b. Delegate the fixes via `Task` to the subagent that owns the PR's branch
+                  prefix (`backend/` -> backend-engineer, `frontend/` ->
+                  frontend-engineer, `strategy/` -> strategy-researcher, `plan/` ->
+                  planner). Pass it the full text of every REQUEST CHANGES review. It
+                  must fix every blocker and major, fix minors when cheap, and may push
+                  back on a finding only with a concrete reason.
+               c. Push the fixes to the same branch (this starts the next review round),
+                  then post one PR comment from the author listing each finding as
+                  fixed / pushed back (with reason) / deferred to a `needs-planning`
+                  issue (with link). Reviewers read this comment next round.
+            5. If every verdict is APPROVE, add `ready-for-human` and remove
+               `needs-human`. Otherwise, if all ${{ env.MAX_FIX_ROUNDS }} fix rounds are
+               used up, add `needs-human` and comment a 3-line summary of what's still
+               disputed.
             Never merge.
           claude_args: >-
             --max-turns 45
