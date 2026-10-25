@@ -128,3 +128,24 @@ def test_rejects_bad_timeframe_and_naive_dates() -> None:
         c.get_bars("SPY", Timeframe.MIN_1, START, END)
     with pytest.raises(ValueError, match="timezone"):
         c.get_bars("SPY", Timeframe.DAY_1, datetime(2024, 1, 1), END)
+
+
+def test_adjustment_is_passed_through_and_invalid_values_are_rejected() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen.append(req)
+        return ok(dict(bars=[], next_page_token=None))
+
+    client = AlpacaBarsClient(
+        "k",
+        "s",
+        adjustment="all",
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    assert client.get_bars("SPY", Timeframe.DAY_1, START, END) == []
+    assert seen[0].url.params["adjustment"] == "all"
+    assert seen[0].url.params["feed"] == "iex"
+
+    with pytest.raises(ValueError, match="adjustment"):
+        AlpacaBarsClient("k", "s", adjustment="invalid")
