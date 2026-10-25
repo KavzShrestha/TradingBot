@@ -24,6 +24,7 @@ FEED = "iex"
 PAGE_LIMIT = 10_000
 SUPPORTED_TIMEFRAMES = frozenset({Timeframe.DAY_1, Timeframe.HOUR_1})
 _RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
+SUPPORTED_ADJUSTMENTS = frozenset({"raw", "split", "dividend", "all"})
 
 
 class AlpacaDataError(RuntimeError):
@@ -31,6 +32,8 @@ class AlpacaDataError(RuntimeError):
 
 
 class AlpacaBarsClient:
+    """Fetch Alpaca bars; adjustment defaults to ``raw`` and feed is fixed to IEX."""
+
     def __init__(
         self,
         api_key: str,
@@ -40,12 +43,18 @@ class AlpacaBarsClient:
         max_retries: int = 5,
         backoff_seconds: float = 0.5,
         max_backoff_seconds: float = 30.0,
+        adjustment: str = "raw",
         client: httpx.Client | None = None,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         if _is_live_endpoint(base_url):
             raise ValueError(f"Refusing live/production endpoint: {base_url}")
+        if adjustment not in SUPPORTED_ADJUSTMENTS:
+            raise ValueError(
+                f"unsupported adjustment {adjustment!r}; use raw, split, dividend, or all"
+            )
         self._base_url = base_url.rstrip("/")
+        self._adjustment = adjustment
         self._headers = {"APCA-API-KEY-ID": api_key, "APCA-API-SECRET-KEY": api_secret}
         self._max_retries = max_retries
         self._backoff = backoff_seconds
@@ -66,7 +75,7 @@ class AlpacaBarsClient:
             "start": start.isoformat(),
             "end": end.isoformat(),
             "feed": FEED,
-            "adjustment": "raw",
+            "adjustment": self._adjustment,
             "limit": PAGE_LIMIT,
         }
         bars: list[Bar] = []
